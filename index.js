@@ -9,7 +9,7 @@
 
 /**
  * Transform HTML code to a PdfMake object
- * @param  {String} htmlText The HTML code to transform
+ * @param  {String} input The DOM Element OR HTML code to transform
  * @param  {Object} [options]
  *   @param  {Object} [defaultStyles] An object with the default styles for each elements
  *   @param  {Boolean} [tableAutoSize=false] It permits to use the width/height defined in styles for a table's cells and rows
@@ -33,7 +33,7 @@
  * });
  */
 //var util = require("util"); // to debug
-module.exports = function(htmlText, options) {
+module.exports = function(input, options) {
   var wndw = (options && options.window ? options.window : window);
   var tableAutoSize = (options && typeof options.tableAutoSize === "boolean" ? options.tableAutoSize : false);
 
@@ -87,15 +87,28 @@ module.exports = function(htmlText, options) {
    * Takes an HTML string, converts to HTML using a DOM parser and recursivly parses
    * the content into pdfmake compatible doc definition
    *
-   * @param htmlText the html text to translate as string
+   * @param input the html text to translate as string
    * @returns pdfmake doc definition as object
    */
-  var convertHtml = function(htmlText) {
+  var convertHtml = function(input) {
     // Create a HTML DOM tree out of html string
     var parser = new wndw.DOMParser();
-    var parsedHtml = parser.parseFromString(htmlText, 'text/html');
+    var parsedHtml = parser.parseFromString(input, 'text/html');
 
     var docDef = parseElement(parsedHtml.body, []);
+    // remove first level
+    return  docDef.stack || docDef.text;
+  }
+
+  /**
+   * Takes an HTML string, converts to HTML using a DOM parser and recursivly parses
+   * the content into pdfmake compatible doc definition
+   *
+   * @param input the DOM Element
+   * @returns pdfmake doc definition as object
+   */
+  var convertDOM = function(input) {
+    var docDef = parseElement(input, []);
     // remove first level
     return  docDef.stack || docDef.text;
   }
@@ -321,11 +334,30 @@ module.exports = function(htmlText, options) {
             break;
           }
           case "IMG": {
-            ret.image = element.getAttribute("src");
+            //Draw the image to a canvas element
+            var c = document.createElement("CANVAS");
+            c.width = element.offsetWidth;
+            c.height = element.offsetHeight;
+            var ctx = c.getContext("2d");
+            ctx.drawImage(element, 0, 0, element.offsetWidth, element.offsetHeight);
+
+            //Get a Data URL which can be used by pdfmake
+            ret.image = c.toDataURL();
+            ret.width = convertPxToPt(c.width);
+            ret.height = convertPxToPt(c.height);
+
             delete ret.stack;
             delete ret.text;
             // apply all the inhirent classes and styles from the parents, or for the current element
             ret = applyStyle({ret:ret, parents:parents.concat([element])});
+            break;
+          }
+          case "CANVAS": {
+            ret.image = element.toDataURL();
+            ret.width = convertPxToPt(element.width);
+            ret.height = convertPxToPt(element.height);
+            delete ret.stack;
+            delete ret.text;
             break;
           }
           case "A": {
@@ -620,7 +652,7 @@ module.exports = function(htmlText, options) {
     val = mtch[1];
     switch(mtch[3]) {
       case 'px':{
-        val = Math.round(val * 0.75292857248934); // 1px => 0.75292857248934pt
+        val = convertPxToPt(val);
         break;
       }
       case 'rem':{
@@ -631,5 +663,20 @@ module.exports = function(htmlText, options) {
     return val*1;
   }
 
-  return convertHtml(htmlText)
+    /**
+   * Convert 'px' value 'pt'
+   *
+   * @param  {Number} val The pixel value
+   */
+  var convertPxToPt = function(val)
+  {
+    return Math.round(val * 0.75292857248934); // 1px => 0.75292857248934pt
+  }
+
+  if (typeof input === 'string')
+    return convertHtml(input);
+  else if (typeof input === 'object')
+    return convertDOM(input);
+
+  return null;
 }
